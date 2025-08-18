@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use rust_stemmers::{Algorithm, Stemmer};
 use std::collections::HashMap;
 use rayon::prelude::*;
+use std::panic;
+
 
 fn get_pdf_files(folder: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
     let files_in_folder = fs::read_dir(folder)?;
@@ -19,10 +21,25 @@ fn get_pdf_files(folder: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
     Ok(pdfs)
 }
 
-fn parse_and_tokenize(pdf_file: &Path)-> Result<Vec<String>, pdf_extract::OutputError> {
-    let pdf_content = extract_text(pdf_file)?;
-    let stemmer = Stemmer::create(Algorithm::English);
-    let tokens: Vec<String> = pdf_content
+fn get_pdf_content(pdf_file: &Path) -> Option<String> {
+    let parse_attempt = panic::catch_unwind(|| extract_text(pdf_file));
+    match parse_attempt { 
+        Ok(Ok(content)) => Some(content), 
+        Ok(Err(_)) => { 
+            eprintln!("FAILED! : {}", pdf_file.display()); 
+            None
+        }
+        Err(_) => { 
+            eprintln!("PANIC! : {}", pdf_file.display());
+            None 
+        } 
+    } 
+}
+
+fn parse_and_tokenize(pdf_file: &Path)-> Option<Vec<String>> {
+    if let Some(pdf_content) = get_pdf_content(pdf_file) {
+        let stemmer = Stemmer::create(Algorithm::English);
+        let tokens: Vec<String> = pdf_content
         .split(|c: char| !c.is_alphanumeric() && c != '-') // keep hyphens inside tokens
         .filter(|s| !s.is_empty())
         .map(|s| s.to_lowercase())
@@ -38,20 +55,25 @@ fn parse_and_tokenize(pdf_file: &Path)-> Result<Vec<String>, pdf_extract::Output
         .filter(|s| !s.is_empty())
         .map(|s| stemmer.stem(&s).to_string())
         .collect();
-    Ok(tokens)  
+        // println!("Extracted text from PDF: {}", pdf_file.display());
+        Some(tokens)  
+    } else {
+        None
+    }
 }
 
 
 // Tokenize a single PDF and return counts
 fn unique_tokens_count(pdf_file: &Path) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
-    if let Ok(tokens) = parse_and_tokenize(pdf_file) {
+    if let Some(tokens) = parse_and_tokenize(pdf_file) {
         for token in tokens {
             *counts.entry(token).or_insert(0) += 1;
         }
     }
     counts
 }
+
 fn main() {
     let folder =Path::new(".\\data");
     if let Ok(pdf_files) = get_pdf_files(folder) {
@@ -75,13 +97,13 @@ fn main() {
                 }
             }
 
-            // Debug: print TF for first few tokens
-                for (token, docs) in tf.iter().take(5) {
-                    println!("Token: {}", token);
-                    for (doc, count) in docs {
-                        println!("  {} -> {}", doc, count);
-                    }
-                }
+            // // Debug: print TF for first few tokens
+            //     for (token, docs) in tf.iter().take(5) {
+            //         println!("Token: {}", token);
+            //         for (doc, count) in docs {
+            //             println!("  {} -> {}", doc, count);
+            //         }
+            //     }
 
         }
     } else {
